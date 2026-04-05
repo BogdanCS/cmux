@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Behavioral tests for Resources/bin/copilot and Resources/bin/copilot-pty-helper.
+Behavioral tests for Resources/bin/copilot.
 
 All tests exercise observable runtime behavior via subprocess execution of the
-actual scripts — no running cmux app required.  Fake `copilot` and `cmux`
+actual script — no running cmux app required.  Fake `copilot` and `cmux`
 binaries are created in temp directories for full isolation.
+
+PTY idle-detection tests call the script with the internal `--pty-mode` flag
+so the child binary can be supplied directly without needing it in PATH.
 
 Run with:
     python3 tests/test_copilot_wrapper.py
@@ -24,7 +27,6 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WRAPPER = os.path.join(REPO_ROOT, "Resources", "bin", "copilot")
-PTY_HELPER = os.path.join(REPO_ROOT, "Resources", "bin", "copilot-pty-helper")
 WRAPPER_DIR = os.path.dirname(WRAPPER)
 
 # Always include system bin dirs so fake scripts using #!/usr/bin/env bash work.
@@ -47,7 +49,7 @@ def _write_exe(path: str, content: str) -> None:
 # ---------------------------------------------------------------------------
 
 class TestWrapperPassthrough(unittest.TestCase):
-    """The bash wrapper execs the real copilot unchanged outside cmux."""
+    """The wrapper execs the real copilot unchanged outside cmux."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
@@ -89,7 +91,7 @@ class TestWrapperPassthrough(unittest.TestCase):
 
 
 class TestWrapperFindRealCopilot(unittest.TestCase):
-    """find_real_copilot skips the wrapper's own directory."""
+    """_find_real_copilot skips the wrapper's own directory."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
@@ -123,41 +125,17 @@ class TestWrapperFindRealCopilot(unittest.TestCase):
         self.assertIn("copilot", result.stderr.lower())
 
 
-class TestWrapperFallbackWithoutHelper(unittest.TestCase):
-    """Wrapper falls back to direct exec when PTY helper is missing."""
-
-    def setUp(self) -> None:
-        self.tmp = tempfile.mkdtemp()
-        _write_exe(os.path.join(self.tmp, "copilot"), textwrap.dedent("""\
-            #!/usr/bin/env bash
-            echo "direct-exec"
-            exit 0
-        """))
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_direct_exec_when_helper_missing(self) -> None:
-        """With CMUX_SURFACE_ID set but helper absent, wrapper execs real copilot directly."""
-        env = {
-            **os.environ,
-            "PATH": _safe_path(WRAPPER_DIR, self.tmp),
-            "CMUX_SURFACE_ID": "test-surface",
-            "CMUX_COPILOT_PTY_HELPER": "/nonexistent/copilot-pty-helper",
-        }
-        result = subprocess.run(
-            [WRAPPER], env=env, capture_output=True, text=True, timeout=10,
-        )
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("direct-exec", result.stdout)
-
-
 # ---------------------------------------------------------------------------
 # PTY helper tests — idle-detection based
 # ---------------------------------------------------------------------------
 
 class TestPtyHelperIdleDetection(unittest.TestCase):
-    """PTY helper fires cmux notify after the child is silent for IDLE_THRESHOLD."""
+    """
+    Idle-detection loop: fires cmux notify after the child is silent for IDLE_THRESHOLD.
+
+    Tests call the script with `--pty-mode <cmux_bin> <child_bin>` to exercise
+    the PTY logic directly without needing a real `copilot` binary in PATH.
+    """
 
     # Use a very short threshold so tests run fast.
     IDLE_THRESHOLD = "0.15"
@@ -191,7 +169,7 @@ class TestPtyHelperIdleDetection(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
-            [sys.executable, PTY_HELPER, self.fake_cmux, child_bin],
+            [sys.executable, WRAPPER, "--pty-mode", self.fake_cmux, child_bin],
             env=env,
             capture_output=True,
             timeout=timeout,
@@ -332,7 +310,7 @@ class TestPtyHelperIdleDetection(unittest.TestCase):
         }
 
         proc = subprocess.Popen(
-            [sys.executable, PTY_HELPER, self.fake_cmux, child_bin],
+            [sys.executable, WRAPPER, "--pty-mode", self.fake_cmux, child_bin],
             stdin=slave_stdin_fd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
