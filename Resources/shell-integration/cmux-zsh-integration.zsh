@@ -174,6 +174,22 @@ _cmux_install_claude_wrapper() {
 }
 _cmux_install_claude_wrapper
 
+typeset -g _CMUX_COPILOT_WRAPPER=""
+_cmux_install_copilot_wrapper() {
+    local integration_dir="${CMUX_SHELL_INTEGRATION_DIR:-}"
+    [[ -n "$integration_dir" ]] || return 0
+
+    integration_dir="${integration_dir%/}"
+    local bundle_dir="${integration_dir%/shell-integration}"
+    local wrapper_path="$bundle_dir/bin/copilot"
+    [[ -x "$wrapper_path" ]] || return 0
+
+    _CMUX_COPILOT_WRAPPER="$wrapper_path"
+    builtin unalias copilot >/dev/null 2>&1 || true
+    eval 'copilot() { "$_CMUX_COPILOT_WRAPPER" "$@"; }'
+}
+_cmux_install_copilot_wrapper
+
 # Throttle heavy work to avoid prompt latency.
 typeset -g _CMUX_PWD_LAST_PWD=""
 typeset -g _CMUX_GIT_LAST_PWD=""

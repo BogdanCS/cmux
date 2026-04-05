@@ -169,6 +169,29 @@ _cmux_install_claude_wrapper() {
     eval 'claude() { "$_CMUX_CLAUDE_WRAPPER" "$@"; }'
 }
 _cmux_install_claude_wrapper
+_CMUX_COPILOT_WRAPPER="${_CMUX_COPILOT_WRAPPER:-}"
+_cmux_install_copilot_wrapper() {
+    local integration_dir="${CMUX_SHELL_INTEGRATION_DIR:-}"
+    local existing_type=""
+    [[ -n "$integration_dir" ]] || return 0
+
+    integration_dir="${integration_dir%/}"
+    local bundle_dir="${integration_dir%/shell-integration}"
+    local wrapper_path="$bundle_dir/bin/copilot"
+    [[ -x "$wrapper_path" ]] || return 0
+
+    existing_type="$(type -t copilot 2>/dev/null || true)"
+    case "$existing_type" in
+        alias|function)
+            return 0
+            ;;
+    esac
+
+    _CMUX_COPILOT_WRAPPER="$wrapper_path"
+    unalias copilot >/dev/null 2>&1 || true
+    eval 'copilot() { "$_CMUX_COPILOT_WRAPPER" "$@"; }'
+}
+_cmux_install_copilot_wrapper
 _cmux_now() {
     printf '%s\n' "${EPOCHSECONDS:-$SECONDS}"
 }

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# cmux copilot wrapper - detects when copilot needs input and fires cmux notification
+#
+# When running inside a cmux terminal (CMUX_SURFACE_ID is set), this wrapper
+# intercepts `copilot` invocations and delegates to copilot-pty-helper, a Python
+# PTY shim that watches output for input-prompt patterns and fires `cmux notify`.
+# Outside cmux, it passes through to the real copilot binary unchanged.
+
+# Find the real copilot binary, skipping our own directory.
+find_real_copilot() {
+    local self_dir
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    local IFS=:
+    for d in $PATH; do
+        [[ "$d" == "$self_dir" ]] && continue
+        [[ -x "$d/copilot" ]] && printf '%s' "$d/copilot" && return 0
+    done
+    return 1
+}
+
+resolve_cmux_bin() {
+    local self_dir bundled_cli
+    bundled_cli="${CMUX_BUNDLED_CLI_PATH:-}"
+    if [[ -n "$bundled_cli" && -x "$bundled_cli" ]]; then
+        printf '%s' "$bundled_cli"
+        return 0
+    fi
+
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    bundled_cli="$self_dir/cmux"
+    if [[ -x "$bundled_cli" ]]; then
+        printf '%s' "$bundled_cli"
+        return 0
+    fi
+
+    bundled_cli="$(command -v cmux || true)"
+    [[ -n "$bundled_cli" ]] && printf '%s' "$bundled_cli" && return 0
+    printf '%s' "cmux"
+}
+
+REAL_COPILOT="$(find_real_copilot)" || {
+    echo "cmux copilot wrapper: could not locate real copilot binary" >&2
+    exit 1
+}
+
+# Pass through immediately if not in a cmux terminal.
+if [[ -z "${CMUX_SURFACE_ID:-}" ]]; then
+    exec "$REAL_COPILOT" "$@"
+fi
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+CMUX_BIN="$(resolve_cmux_bin)"
+# Allow tests to override the helper path.
+PTY_HELPER="${CMUX_COPILOT_PTY_HELPER:-$SELF_DIR/copilot-pty-helper}"
+
+# If the PTY helper or python3 is unavailable, run copilot directly (no notification).
+if [[ ! -f "$PTY_HELPER" ]] || ! command -v python3 >/dev/null 2>&1; then
+    exec "$REAL_COPILOT" "$@"
+fi
+
+# exec replaces this process so the helper inherits the real TTY stdin — critical
+# for interactive forwarding to work correctly.
+exec python3 "$PTY_HELPER" "$CMUX_BIN" "$REAL_COPILOT" "$@"
